@@ -15,6 +15,13 @@ import (
 	"go-micro.dev/v4/util/cmd"
 )
 
+// added for ET
+type BrokerWrapper interface {
+	broker.Broker
+	GetStatsOfQueue(name string) (int, int, error) //Ready count, Consumer count
+	ClearQueue(name string) (int, error)
+}
+
 type rbroker struct {
 	conn           *rabbitMQConn
 	addrs          []string
@@ -388,6 +395,23 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	}
 }
 
+// added for ET
+func NewBrokerWrapper(opts ...broker.Option) BrokerWrapper {
+	options := broker.Options{
+		Context: context.Background(),
+		Logger:  logger.DefaultLogger,
+	}
+
+	for _, o := range opts {
+		o(&options)
+	}
+
+	return &rbroker{
+		addrs: options.Addrs,
+		opts:  options,
+	}
+}
+
 func (r *rbroker) getExchange() Exchange {
 	ex := DefaultExchange
 
@@ -421,4 +445,40 @@ func (r *rbroker) getConfirmPublish() bool {
 		return e
 	}
 	return DefaultConfirmPublish
+}
+
+// added for ET
+func (r *rbroker) GetStatsOfQueue(name string) (int, int, error) {
+	if r.conn == nil || r.conn.Connection == nil {
+		return 0, 0, errors.New("rabbitmq broker not ready")
+	}
+
+	connCH, err := r.conn.Connection.Channel()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer connCH.Close()
+
+	q, err := connCH.QueueInspect(name)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return q.Messages, q.Consumers, nil
+
+}
+
+// added for ET
+func (r *rbroker) ClearQueue(name string) (int, error) {
+	if r.conn == nil || r.conn.Connection == nil {
+		return 0, errors.New("rabbitmq broker not ready")
+	}
+
+	connCH, err := r.conn.Connection.Channel()
+	if err != nil {
+		return 0, err
+	}
+	defer connCH.Close()
+
+	return connCH.QueuePurge(name, false)
 }
